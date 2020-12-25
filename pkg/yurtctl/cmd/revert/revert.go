@@ -21,7 +21,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -31,6 +31,7 @@ import (
 	"github.com/alibaba/openyurt/pkg/yurtctl/constants"
 	"github.com/alibaba/openyurt/pkg/yurtctl/lock"
 	kubeutil "github.com/alibaba/openyurt/pkg/yurtctl/util/kubernetes"
+	nodeutil "k8s.io/kubernetes/pkg/controller/util/node"
 )
 
 // ConvertOptions has the information required by the revert operation
@@ -100,12 +101,25 @@ func (ro *RevertOptions) RunRevert() (err error) {
 	}
 	klog.V(4).Info("the server version is valid")
 
-	// 2. remove labels from nodes
+	// 1.1. check the state of worker nodes
 	nodeLst, err := ro.clientSet.CoreV1().Nodes().List(metav1.ListOptions{})
 	if err != nil {
 		return
 	}
 
+	for _, node := range nodeLst.Items {
+		isEdgeNode, ok := node.Labels[projectinfo.GetEdgeWorkerLabelKey()]
+		if ok && isEdgeNode == "true" {
+			_, condition := nodeutil.GetNodeCondition(&node.Status, v1.NodeReady)
+			if condition == nil || condition.Status != v1.ConditionTrue {
+				klog.Errorf("Cannot do the revert, the status of worker node: %s is not 'Ready'.", node.Name)
+				return
+			}
+		}
+	}
+	klog.V(4).Info("the status of worker nodes are satisfied")
+
+	// 2. remove labels from nodes
 	var edgeNodeNames []string
 	for _, node := range nodeLst.Items {
 		isEdgeNode, ok := node.Labels[projectinfo.GetEdgeWorkerLabelKey()]
@@ -138,19 +152,49 @@ func (ro *RevertOptions) RunRevert() (err error) {
 	}
 	klog.Info("yurt controller manager is removed")
 
-	// 5. remove the yurt-tunnel agent
+	// 3.1 remove the serviceaccount for yurt-controller-manager
+	if err = ro.clientSet.CoreV1().ServiceAccounts("kube-system").
+		Delete("yurt-controller-manager", &metav1.DeleteOptions{
+			PropagationPolicy: &kubeutil.PropagationPolicy,
+		}); err != nil && !apierrors.IsNotFound(err) {
+		klog.Errorf("fail to remove serviceaccount for yurt controller manager: %s", err)
+		return
+	}
+	klog.Info("serviceaccount for yurt controller manager is removed")
+
+	// 3.2 remove the clusterrole for yurt-controller-manager
+	if err = ro.clientSet.RbacV1().ClusterRoles().
+		Delete("yurt-controller-manager", &metav1.DeleteOptions{
+			PropagationPolicy: &kubeutil.PropagationPolicy,
+		}); err != nil && !apierrors.IsNotFound(err) {
+		klog.Errorf("fail to remove clusterrole for yurt controller manager: %s", err)
+		return
+	}
+	klog.Info("clusterrole for yurt controller manager is removed")
+
+	// 3.3 remove the clusterrolebinding for yurt-controller-manager
+	if err = ro.clientSet.RbacV1().ClusterRoleBindings().
+		Delete("yurt-controller-manager", &metav1.DeleteOptions{
+			PropagationPolicy: &kubeutil.PropagationPolicy,
+		}); err != nil && !apierrors.IsNotFound(err) {
+		klog.Errorf("fail to remove clusterrolebinding for yurt controller manager: %s", err)
+		return
+	}
+	klog.Info("clusterrolebinding for yurt controller manager is removed")
+
+	// 4. remove the yurt-tunnel agent
 	if err = removeYurtTunnelAgent(ro.clientSet); err != nil {
 		klog.Errorf("fail to remove the yurt tunnel agent: %s", err)
 		return
 	}
 
-	// 6. remove the yurt-tunnel server
+	// 5. remove the yurt-tunnel server
 	if err = removeYurtTunnelServer(ro.clientSet); err != nil {
 		klog.Errorf("fail to remove the yurt tunnel server: %s", err)
 		return
 	}
 
-	// 7. recreate the node-controller service account
+	// 6. recreate the node-controller service account
 	ncSa := &v1.ServiceAccount{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "node-controller",
@@ -164,7 +208,7 @@ func (ro *RevertOptions) RunRevert() (err error) {
 	}
 	klog.Info("ServiceAccount node-controller is created")
 
-	// 8. remove yurt-hub and revert kubelet service
+	// 7. remove yurt-hub and revert kubelet service
 	if err = kubeutil.RunServantJobs(ro.clientSet,
 		map[string]string{
 			"action":                "revert",
@@ -181,7 +225,7 @@ func (ro *RevertOptions) RunRevert() (err error) {
 func removeYurtTunnelServer(client *kubernetes.Clientset) error {
 	// 1. remove the DaemonSet
 	if err := client.AppsV1().
-		DaemonSets(constants.YurttunnelNamespace).
+		Deployments(constants.YurttunnelNamespace).
 		Delete(constants.YurttunnelServerComponentName,
 			&metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
 		return fmt.Errorf("fail to delete the daemonset/%s: %s",
@@ -222,6 +266,14 @@ func removeYurtTunnelServer(client *kubernetes.Clientset) error {
 			&metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
 		return fmt.Errorf("fail to delete the clusterrole/%s: %s",
 			constants.YurttunnelServerComponentName, err)
+	}
+
+	// 6. remove the ConfigMap
+	if err := client.CoreV1().ConfigMaps(constants.YurttunnelNamespace).
+		Delete(constants.YurttunnelServerCmName,
+			&metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("fail to delete the configmap/%s: %s",
+			constants.YurttunnelServerCmName, err)
 	}
 	klog.V(4).Infof("clusterrole/%s is deleted", constants.YurttunnelServerComponentName)
 	return nil
