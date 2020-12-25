@@ -17,6 +17,7 @@ limitations under the License.
 package projectinfo
 
 import (
+	"fmt"
 	"runtime"
 )
 
@@ -26,8 +27,6 @@ var (
 	gitVersion    = "v0.0.0"
 	gitCommit     = "unknown"
 	buildDate     = "1970-01-01T00:00:00Z"
-	compiler      = runtime.Compiler
-	platform      = runtime.GOOS + "/" + runtime.GOARCH
 )
 
 func ShortAgentVersion() string {
@@ -62,4 +61,56 @@ func GetAgentName() string {
 // identify if a node is a edge node ("true") or a cloud node ("false")
 func GetEdgeWorkerLabelKey() string {
 	return labelPrefix + "/is-edge-worker"
+}
+
+// GetHubName returns name of yurthub agent
+func GetHubName() string {
+	return projectPrefix + "hub"
+}
+
+// GetEdgeEnableTunnelLabelKey returns the tunnel agent label, which is used
+// to identify if tunnel agent is running on the node or not.
+func GetEdgeEnableTunnelLabelKey() string {
+	return labelPrefix + "/edge-enable-reverseTunnel-client"
+}
+
+// GetTunnelName returns name of tunnel
+func GetTunnelName() string {
+	return projectPrefix + "tunnel"
+}
+
+// GetYurtControllerManagerName returns name of openyurt controller-manager
+func GetYurtControllerManagerName() string {
+	return projectPrefix + "controller-manager"
+}
+
+// normalizeGitCommit reserve 7 characters for gitCommit
+func normalizeGitCommit(commit string) string {
+	if len(commit) > 7 {
+		return commit[:7]
+	}
+
+	return commit
+}
+
+// Info contains version information.
+type Info struct {
+	GitVersion string `json:"gitVersion"`
+	GitCommit  string `json:"gitCommit"`
+	BuildDate  string `json:"buildDate"`
+	GoVersion  string `json:"goVersion"`
+	Compiler   string `json:"compiler"`
+	Platform   string `json:"platform"`
+}
+
+// Get returns the overall codebase version.
+func Get() Info {
+	return Info{
+		GitVersion: gitVersion,
+		GitCommit:  normalizeGitCommit(gitCommit),
+		BuildDate:  buildDate,
+		GoVersion:  runtime.Version(),
+		Compiler:   runtime.Compiler,
+		Platform:   fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH),
+	}
 }

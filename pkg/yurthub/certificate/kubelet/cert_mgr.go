@@ -25,11 +25,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/alibaba/openyurt/pkg/yurthub/healthchecker"
-
 	"github.com/alibaba/openyurt/cmd/yurthub/app/config"
 	"github.com/alibaba/openyurt/pkg/yurthub/certificate"
 	"github.com/alibaba/openyurt/pkg/yurthub/certificate/interfaces"
+	"github.com/alibaba/openyurt/pkg/yurthub/healthchecker"
 	"github.com/alibaba/openyurt/pkg/yurthub/util"
 
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -69,7 +68,7 @@ func NewKubeletCertManager(cfg *config.YurtHubConfiguration, period time.Duratio
 	var cert *tls.Certificate
 	var pairFile string
 	if cfg == nil || len(cfg.RemoteServers) == 0 {
-		return nil, fmt.Errorf("yurthub configuration is invalid")
+		return nil, fmt.Errorf("hub configuration is invalid")
 	}
 
 	if period == time.Duration(0) {

@@ -27,6 +27,7 @@ gen-yaml:
 # Run test
 test: fmt vet
 	go test ./pkg/... ./cmd/... -coverprofile cover.out
+	go test -v  -coverpkg=./pkg/yurttunnel/...  -coverprofile=yurttunnel-cover.out ./test/integration/yurttunnel_test.go
 
 # Run go fmt against code
 fmt:
@@ -53,7 +54,7 @@ vet:
 #   # compile all components with all architectures (i.e., amd64, arm64, arm)
 #   make relase 
 release:
-	hack/make-rules/release-images.sh
+	bash hack/make-rules/release-images.sh
 
 clean: 
 	-rm -Rf _output
